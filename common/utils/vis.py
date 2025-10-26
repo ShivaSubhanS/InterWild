@@ -5,26 +5,10 @@
 # LICENSE file in the root directory of this source tree.
 # 
 
-import os
 import cv2
 import numpy as np
-from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.pyplot as plt
-import matplotlib as mpl
 from config import cfg
-os.environ["PYOPENGL_PLATFORM"] = "egl"
-import torch
-from pytorch3d.structures import Meshes
-from pytorch3d.renderer import (
-PointLights,
-PerspectiveCameras,
-OrthographicCameras,
-Materials,
-SoftPhongShader,
-RasterizationSettings,
-MeshRendererWithFragments,
-MeshRasterizer,
-TexturesVertex)
 
 def vis_keypoints_with_skeleton(img, kps, kps_lines, color=None):
     skeleton_num = len(kps_lines)
@@ -74,23 +58,6 @@ def vis_keypoints(img, kps, alpha=1):
     # Blend the keypoints.
     return cv2.addWeighted(img, 1.0 - alpha, kp_mask, alpha, 0)
 
-def vis_mesh(img, mesh_vertex, alpha=0.5):
-    # Convert from plt 0-1 RGBA colors to 0-255 BGR colors for opencv.
-    cmap = plt.get_cmap('rainbow')
-    colors = [cmap(i) for i in np.linspace(0, 1, len(mesh_vertex))]
-    colors = [(c[2] * 255, c[1] * 255, c[0] * 255) for c in colors]
-
-    # Perform the drawing on a copy of the image, to allow for blending.
-    mask = np.copy(img)
-
-    # Draw the mesh
-    for i in range(len(mesh_vertex)):
-        p = mesh_vertex[i][0].astype(np.int32), mesh_vertex[i][1].astype(np.int32)
-        cv2.circle(mask, p, radius=1, color=colors[i], thickness=-1, lineType=cv2.LINE_AA)
-
-    # Blend the keypoints.
-    return cv2.addWeighted(img, 1.0 - alpha, mask, alpha, 0)
-
 def vis_3d_skeleton(kpt_3d, kps_lines, filename=None):
 
     fig = plt.figure()
@@ -128,86 +95,4 @@ def vis_3d_skeleton(kpt_3d, kps_lines, filename=None):
 
     plt.show()
     cv2.waitKey(0)
-
-def save_obj(v, f, file_name='output.obj'):
-    obj_file = open(file_name, 'w')
-    for i in range(len(v)):
-        obj_file.write('v ' + str(v[i][0]) + ' ' + str(v[i][1]) + ' ' + str(v[i][2]) + '\n')
-    for i in range(len(f)):
-        obj_file.write('f ' + str(f[i][0]+1) + '/' + str(f[i][0]+1) + ' ' + str(f[i][1]+1) + '/' + str(f[i][1]+1) + ' ' + str(f[i][2]+1) + '/' + str(f[i][2]+1) + '\n')
-    obj_file.close()
-
-def render_mesh_orthogonal(mesh, face, cam_param, render_shape, hand_type):
-    batch_size, vertex_num = mesh.shape[:2]
-
-    textures = TexturesVertex(verts_features=torch.ones((batch_size,vertex_num,3)).float().cuda())
-    mesh = torch.stack((-mesh[:,:,0], -mesh[:,:,1], mesh[:,:,2]),2) # reverse x- and y-axis following PyTorch3D axis direction
-    mesh = Meshes(mesh, face, textures)
-    
-    cameras = OrthographicCameras(focal_length=cam_param['focal'], 
-                                principal_point=cam_param['princpt'], 
-                                device='cuda',
-                                in_ndc=False,
-                                image_size=torch.LongTensor(render_shape).cuda().view(1,2))
-    raster_settings = RasterizationSettings(image_size=render_shape, blur_radius=0.0, faces_per_pixel=1)#, perspective_correct=True)
-    rasterizer = MeshRasterizer(cameras=cameras, raster_settings=raster_settings).cuda()
-    lights = PointLights(device='cuda')
-    shader = SoftPhongShader(device='cuda', cameras=cameras, lights=lights)
-    if hand_type == 'right':
-        color = ((1.0, 0.0, 0.0),)
-    else:
-        color = ((0.0, 1.0, 0.0),)
-    materials = Materials(
-	device='cuda',
-        ambient_color=((0.5,0.5,0.5),),
-        diffuse_color=((1.0,1.0,1.0),),
-        specular_color=color,
-	shininess=0
-    )
-
-    # render
-    with torch.no_grad():
-        renderer = MeshRendererWithFragments(rasterizer=rasterizer, shader=shader)
-        images, fragments = renderer(mesh, materials=materials)
-        images = images[:,:,:,:3] * 255
-        depthmaps = fragments.zbuf
-
-    return images, depthmaps
-
-def render_mesh_perspective(mesh, face, cam_param, render_shape, hand_type):
-    batch_size, vertex_num = mesh.shape[:2]
-
-    textures = TexturesVertex(verts_features=torch.ones((batch_size,vertex_num,3)).float().cuda())
-    mesh = torch.stack((-mesh[:,:,0], -mesh[:,:,1], mesh[:,:,2]),2) # reverse x- and y-axis following PyTorch3D axis direction
-    mesh = Meshes(mesh, face, textures)
-    
-    cameras = PerspectiveCameras(focal_length=cam_param['focal'], 
-                                principal_point=cam_param['princpt'], 
-                                device='cuda',
-                                in_ndc=False,
-                                image_size=torch.LongTensor(render_shape).cuda().view(1,2))
-    raster_settings = RasterizationSettings(image_size=render_shape, blur_radius=0.0, faces_per_pixel=1)#, perspective_correct=True)
-    rasterizer = MeshRasterizer(cameras=cameras, raster_settings=raster_settings).cuda()
-    lights = PointLights(device='cuda')
-    shader = SoftPhongShader(device='cuda', cameras=cameras, lights=lights)
-    if hand_type == 'right':
-        color = ((1.0, 0.0, 0.0),)
-    else:
-        color = ((0.0, 1.0, 0.0),)
-    materials = Materials(
-	device='cuda',
-        ambient_color=((0.5,0.5,0.5),),
-        diffuse_color=((1.0,1.0,1.0),),
-        specular_color=color,
-	shininess=0
-    )
-
-    # render
-    with torch.no_grad():
-        renderer = MeshRendererWithFragments(rasterizer=rasterizer, shader=shader)
-        images, fragments = renderer(mesh, materials=materials)
-        images = images[:,:,:,:3] * 255
-        depthmaps = fragments.zbuf
-
-    return images, depthmaps
 

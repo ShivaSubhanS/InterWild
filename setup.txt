@@ -1,0 +1,4 @@
+git clone https://github.com/ShivaSubhanS/InterWild
+pip install kornia
+download model snapshot_6.pth
+mv to demo folder

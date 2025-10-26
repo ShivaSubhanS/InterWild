@@ -7,7 +7,81 @@
 
 import torch
 import torch.nn as nn
-from pytorch3d.transforms import axis_angle_to_matrix, matrix_to_axis_angle
+
+# PyTorch-only implementation to replace pytorch3d functions
+def axis_angle_to_matrix(axis_angle):
+    """
+    Convert axis-angle rotation to 3x3 rotation matrix using Rodrigues' formula.
+    
+    Args:
+        axis_angle: (B, 3) or (B, N, 3) axis-angle vectors
+    Returns:
+        (B, 3, 3) or (B, N, 3, 3) rotation matrices
+    """
+    batch_dims = axis_angle.shape[:-1]
+    axis_angle = axis_angle.reshape(-1, 3)
+    
+    angle = torch.norm(axis_angle, dim=1, keepdim=True)
+    axis = axis_angle / (angle + 1e-8)
+    
+    # Rodrigues' formula
+    cos_angle = torch.cos(angle)
+    sin_angle = torch.sin(angle)
+    
+    # Cross product matrix
+    K = torch.zeros(axis_angle.shape[0], 3, 3, device=axis_angle.device)
+    K[:, 0, 1] = -axis[:, 2]
+    K[:, 0, 2] = axis[:, 1]
+    K[:, 1, 0] = axis[:, 2]
+    K[:, 1, 2] = -axis[:, 0]
+    K[:, 2, 0] = -axis[:, 1]
+    K[:, 2, 1] = axis[:, 0]
+    
+    # Rotation matrix: R = I + sin(θ)K + (1-cos(θ))K^2
+    I = torch.eye(3, device=axis_angle.device).unsqueeze(0).expand(axis_angle.shape[0], -1, -1)
+    R = I + sin_angle.unsqueeze(2) * K + (1 - cos_angle).unsqueeze(2) * torch.bmm(K, K)
+    
+    # Handle small angles (use identity rotation)
+    small_angle_mask = (angle.squeeze(1) < 1e-3).unsqueeze(1).unsqueeze(2)
+    R = torch.where(small_angle_mask, I, R)
+    
+    return R.reshape(*batch_dims, 3, 3)
+
+def matrix_to_axis_angle(matrix):
+    """
+    Convert 3x3 rotation matrices to axis-angle representation.
+    
+    Args:
+        matrix: (B, 3, 3) or (B, N, 3, 3) rotation matrices
+    Returns:
+        (B, 3) or (B, N, 3) axis-angle vectors
+    """
+    batch_dims = matrix.shape[:-2]
+    matrix = matrix.reshape(-1, 3, 3)
+    
+    # Compute angle
+    trace = matrix[:, 0, 0] + matrix[:, 1, 1] + matrix[:, 2, 2]
+    angle = torch.acos(torch.clamp((trace - 1) / 2, -1, 1))
+    
+    # Compute axis
+    axis = torch.stack([
+        matrix[:, 2, 1] - matrix[:, 1, 2],
+        matrix[:, 0, 2] - matrix[:, 2, 0],
+        matrix[:, 1, 0] - matrix[:, 0, 1]
+    ], dim=1)
+    
+    # Normalize axis
+    axis_norm = torch.norm(axis, dim=1, keepdim=True)
+    axis = axis / (axis_norm + 1e-8)
+    
+    # Axis-angle representation
+    axis_angle = angle.unsqueeze(1) * axis
+    
+    # Handle small angles (use identity rotation)
+    small_angle_mask = (angle < 1e-3).unsqueeze(1)
+    axis_angle = torch.where(small_angle_mask, torch.zeros_like(axis_angle), axis_angle)
+    
+    return axis_angle.reshape(*batch_dims, 3)
 
 class CoordLoss(nn.Module):
     def __init__(self):

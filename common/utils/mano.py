@@ -7,31 +7,17 @@
 
 
 import numpy as np
-import torch
-import os.path as osp
-from config import cfg
-from utils.transforms import transform_joint_to_other_db
-import smplx
 
 class MANO(object):
     def __init__(self):
-        self.layer_arg = {'create_global_orient': False, 'create_hand_pose': False, 'create_betas': False, 'create_transl': False}
-        self.layer = {'right': smplx.create(cfg.human_model_path, 'mano', is_rhand=True, use_pca=False, flat_hand_mean=False, **self.layer_arg), 'left': smplx.create(cfg.human_model_path, 'mano', is_rhand=False, use_pca=False, flat_hand_mean=False, **self.layer_arg)}
-        self.vertex_num = 778
-        self.face = {'right': self.layer['right'].faces, 'left': self.layer['left'].faces}
+        # MANO shape parameter dimension (kept for model compatibility)
         self.shape_param_dim = 10
         
-        # fix MANO shapedirs of the left hand bug (https://github.com/vchoutas/smplx/issues/48)
-        if torch.sum(torch.abs(self.layer['left'].shapedirs[:,0,:] - self.layer['right'].shapedirs[:,0,:])) < 1:
-            print('Fix shapedirs bug of MANO')
-            self.layer['left'].shapedirs[:,0,:] *= -1
-
         # original MANO joint set
         self.orig_joint_num = 16
         self.orig_joints_name = ('Wrist', 'Index_1', 'Index_2', 'Index_3', 'Middle_1', 'Middle_2', 'Middle_3', 'Pinky_1', 'Pinky_2', 'Pinky_3', 'Ring_1', 'Ring_2', 'Ring_3', 'Thumb_1', 'Thumb_2', 'Thumb_3')
         self.orig_root_joint_idx = self.orig_joints_name.index('Wrist')
         self.orig_flip_pairs = ()
-        self.orig_joint_regressor = self.layer['right'].J_regressor.numpy() # same for the right and left hands
 
         # changed MANO joint set (single hands)
         self.sh_joint_num = 21 # manually added fingertips
@@ -39,13 +25,6 @@ class MANO(object):
         self.sh_skeleton = ( (0,1), (1,2), (2,3), (3,4), (0,5), (5,6), (6,7), (7,8), (0,9), (9,10), (10,11), (11,12), (0,13), (13,14), (14,15), (15,16), (0,17), (17,18), (18,19), (19,20) )
         self.sh_root_joint_idx = self.sh_joints_name.index('Wrist')
         self.sh_flip_pairs = ()
-        # add fingertips to joint_regressor
-        self.sh_joint_regressor = transform_joint_to_other_db(self.orig_joint_regressor, self.orig_joints_name, self.sh_joints_name)
-        self.sh_joint_regressor[self.sh_joints_name.index('Thumb_4')] = np.array([1 if i == 745 else 0 for i in range(self.sh_joint_regressor.shape[1])], dtype=np.float32).reshape(1,-1)
-        self.sh_joint_regressor[self.sh_joints_name.index('Index_4')] = np.array([1 if i == 317 else 0 for i in range(self.sh_joint_regressor.shape[1])], dtype=np.float32).reshape(1,-1)
-        self.sh_joint_regressor[self.sh_joints_name.index('Middle_4')] = np.array([1 if i == 445 else 0 for i in range(self.sh_joint_regressor.shape[1])], dtype=np.float32).reshape(1,-1)
-        self.sh_joint_regressor[self.sh_joints_name.index('Ring_4')] = np.array([1 if i == 556 else 0 for i in range(self.sh_joint_regressor.shape[1])], dtype=np.float32).reshape(1,-1)
-        self.sh_joint_regressor[self.sh_joints_name.index('Pinky_4')] = np.array([1 if i == 673 else 0 for i in range(self.sh_joint_regressor.shape[1])], dtype=np.float32).reshape(1,-1)
 
 
         # changed MANO joint set (two hands)

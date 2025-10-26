@@ -12,10 +12,63 @@ from torch.nn import functional as F
 from nets.layer import make_conv_layers, make_deconv_layers, make_linear_layers
 from utils.mano import mano
 from utils.transforms import sample_joint_features, soft_argmax_2d, soft_argmax_3d
-from pytorch3d.transforms import rotation_6d_to_matrix, matrix_to_axis_angle
 import kornia
 import math
 from config import cfg
+
+# PyTorch-only implementation to replace pytorch3d functions
+def rotation_6d_to_matrix(d6):
+    """
+    Converts 6D rotation representation to 3x3 rotation matrix.
+    Based on Zhou et al., "On the Continuity of Rotation Representations in Neural Networks"
+    
+    Args:
+        d6: (B, 6) tensor
+    Returns:
+        (B, 3, 3) rotation matrices
+    """
+    a1, a2 = d6[..., :3], d6[..., 3:]
+    b1 = F.normalize(a1, dim=-1)
+    b2 = a2 - (b1 * a2).sum(-1, keepdim=True) * b1
+    b2 = F.normalize(b2, dim=-1)
+    b3 = torch.cross(b1, b2, dim=-1)
+    return torch.stack((b1, b2, b3), dim=-2)
+
+def matrix_to_axis_angle(matrix):
+    """
+    Convert 3x3 rotation matrices to axis-angle representation.
+    
+    Args:
+        matrix: (B, 3, 3) or (B, N, 3, 3) rotation matrices
+    Returns:
+        (B, 3) or (B, N, 3) axis-angle vectors
+    """
+    batch_dims = matrix.shape[:-2]
+    matrix = matrix.reshape(-1, 3, 3)
+    
+    # Compute angle
+    trace = matrix[:, 0, 0] + matrix[:, 1, 1] + matrix[:, 2, 2]
+    angle = torch.acos(torch.clamp((trace - 1) / 2, -1, 1))
+    
+    # Compute axis
+    axis = torch.stack([
+        matrix[:, 2, 1] - matrix[:, 1, 2],
+        matrix[:, 0, 2] - matrix[:, 2, 0],
+        matrix[:, 1, 0] - matrix[:, 0, 1]
+    ], dim=1)
+    
+    # Normalize axis
+    axis_norm = torch.norm(axis, dim=1, keepdim=True)
+    axis = axis / (axis_norm + 1e-8)
+    
+    # Axis-angle representation
+    axis_angle = angle.unsqueeze(1) * axis
+    
+    # Handle small angles (use identity rotation)
+    small_angle_mask = (angle < 1e-3).unsqueeze(1)
+    axis_angle = torch.where(small_angle_mask, torch.zeros_like(axis_angle), axis_angle)
+    
+    return axis_angle.reshape(*batch_dims, 3)
 
 class PositionNet(nn.Module):
     def __init__(self):

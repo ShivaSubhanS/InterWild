@@ -10,10 +10,8 @@ import numpy as np
 import cv2
 import random
 from config import cfg
-import math
 from utils.mano import mano
-from utils.transforms import cam2pixel, transform_joint_to_other_db
-from plyfile import PlyData, PlyElement
+from utils.transforms import transform_joint_to_other_db
 import torch
 
 def load_img(path, order='RGB'):
@@ -274,76 +272,6 @@ def transform_mano_data(joint_img, joint_cam, mesh_cam, joint_valid, rel_trans, 
 
     return joint_img, joint_cam, mesh_cam, joint_trunc, rel_trans, pose
 
-def get_mano_data(mano_param, cam_param, do_flip, img_shape):
-    pose, shape, trans = mano_param['pose'], mano_param['shape'], mano_param['trans']
-    hand_type = mano_param['hand_type']
-    pose = torch.FloatTensor(pose).view(-1,3); shape = torch.FloatTensor(shape).view(1,-1); # mano parameters (pose: 48 dimension, shape: 10 dimension)
-    trans = torch.FloatTensor(trans).view(1,-1) # translation vector
-    if do_flip:
-        if hand_type == 'right':
-            hand_type = 'left'
-        else:
-            hand_type = 'right'
-
-    # apply camera extrinsic (rotation)
-    # merge root pose and camera rotation 
-    if 'R' in cam_param:
-        R = np.array(cam_param['R'], dtype=np.float32).reshape(3,3)
-        root_pose = pose[mano.orig_root_joint_idx,:].numpy()
-        root_pose, _ = cv2.Rodrigues(root_pose)
-        root_pose, _ = cv2.Rodrigues(np.dot(R,root_pose))
-        pose[mano.orig_root_joint_idx] = torch.from_numpy(root_pose).view(3)
- 
-    # flip pose parameter (axis-angle)
-    if do_flip:
-        for pair in mano.orig_flip_pairs:
-            pose[pair[0], :], pose[pair[1], :] = pose[pair[1], :].clone(), pose[pair[0], :].clone()
-        pose[:,1:3] *= -1 # multiply -1 to y and z axis of axis-angle
-        trans[:,0] *= -1 # multiply -1
- 
-    # get root joint coordinate
-    root_pose = pose[mano.orig_root_joint_idx].view(1,3)
-    hand_pose = torch.cat((pose[:mano.orig_root_joint_idx,:], pose[mano.orig_root_joint_idx+1:,:])).view(1,-1)
-    with torch.no_grad():
-        output = mano.layer[hand_type](betas=shape, hand_pose=hand_pose, global_orient=root_pose, transl=trans)
-    mesh_coord = output.vertices[0].numpy()
-    joint_coord = np.dot(mano.sh_joint_regressor, mesh_coord)
-    
-    # bring geometry to the original (before flip) position
-    if do_flip:
-        flip_trans_x = joint_coord[mano.sh_root_joint_idx,0] * -2
-        mesh_coord[:,0] += flip_trans_x
-        joint_coord[:,0] += flip_trans_x
-
-    # apply camera exrinsic (translation)
-    # compenstate rotation (translation from origin to root joint was not cancled)
-    if 'R' in cam_param and 't' in cam_param:
-        R, t = np.array(cam_param['R'], dtype=np.float32).reshape(3,3), np.array(cam_param['t'], dtype=np.float32).reshape(1,3)
-        root_coord = joint_coord[mano.sh_root_joint_idx,None,:].copy()
-        joint_coord = joint_coord - root_coord + np.dot(R, root_coord.transpose(1,0)).transpose(1,0) + t
-        mesh_coord = mesh_coord - root_coord + np.dot(R, root_coord.transpose(1,0)).transpose(1,0) + t
-
-    # flip translation
-    if do_flip: # avg of old and new root joint should be image center.
-        focal, princpt = cam_param['focal'], cam_param['princpt']
-        flip_trans_x = 2 * (((img_shape[1] - 1)/2. - princpt[0]) / focal[0] * joint_coord[mano.sh_root_joint_idx,2]) - 2 * joint_coord[mano.sh_root_joint_idx][0]
-        mesh_coord[:,0] += flip_trans_x
-        joint_coord[:,0] += flip_trans_x
-
-    # image projection
-    mesh_cam = mesh_coord # camera-centered 3D coordinates (not root-relative)
-    joint_cam = joint_coord # camera-centered 3D coordinates (not root-relative)
-    if 'D' in cam_param:
-        joint_img = distort_projection_fisheye(torch.from_numpy(joint_cam)[None], torch.from_numpy(cam_param['focal'])[None], torch.from_numpy(cam_param['princpt'])[None], torch.from_numpy(cam_param['D'])[None])
-        joint_img = joint_img[0].numpy()
-    else:
-        joint_img = cam2pixel(joint_cam, cam_param['focal'], cam_param['princpt'])
-    joint_img = joint_img[:,:2]
-
-    pose = pose.numpy().reshape(-1)
-    shape = shape.numpy().reshape(-1)
-    return joint_img, joint_cam, mesh_cam, pose, shape
-
 def get_iou(box1, box2, form):
     box1 = box1.copy()
     box2 = box2.copy()
@@ -368,21 +296,3 @@ def get_iou(box1, box2, form):
 
     iou = inter_area / (union_area + 1e-5)
     return iou
-
-def load_obj(file_name):
-    v = []
-    obj_file = open(file_name)
-    for line in obj_file:
-        words = line.split(' ')
-        if words[0] == 'v':
-            x,y,z = float(words[1]), float(words[2]), float(words[3])
-            v.append(np.array([x,y,z]))
-    return np.stack(v)
-
-def load_ply(file_name):
-    plydata = PlyData.read(file_name)
-    x = plydata['vertex']['x']
-    y = plydata['vertex']['y']
-    z = plydata['vertex']['z']
-    v = np.stack((x,y,z),1)
-    return v

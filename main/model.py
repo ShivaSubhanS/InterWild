@@ -14,7 +14,6 @@ from nets.loss import CoordLoss, PoseLoss
 from utils.mano import mano
 from utils.transforms import restore_bbox
 from config import cfg
-import copy
 
 class Model(nn.Module):
     def __init__(self, body_backbone, body_box_net, hand_roi_net, hand_position_net, hand_rotation_net, hand_trans_net):
@@ -27,39 +26,30 @@ class Model(nn.Module):
         self.hand_rotation_net = hand_rotation_net
         self.hand_trans_net = hand_trans_net
         
-        self.mano_layer_right = copy.deepcopy(mano.layer['right']).cuda()
-        self.mano_layer_left = copy.deepcopy(mano.layer['left']).cuda()
+        # MANO layers removed - mesh generation disabled
+        # self.mano_layer_right = copy.deepcopy(mano.layer['right']).cuda()
+        # self.mano_layer_left = copy.deepcopy(mano.layer['left']).cuda()
         self.coord_loss = CoordLoss()
         self.pose_loss = PoseLoss()
  
         self.trainable_modules = [self.body_backbone, self.body_box_net, self.hand_roi_net, self.hand_position_net, self.hand_rotation_net, self.hand_trans_net]
  
     def get_coord(self, root_pose, hand_pose, shape, root_trans, hand_type):
+        # MANO mesh generation disabled - returning dummy values
+        # This method is kept for compatibility but doesn't generate actual meshes
         batch_size = root_pose.shape[0]
-        zero_trans = torch.zeros((batch_size,3)).float().cuda()
-        if hand_type == 'right':
-            output = self.mano_layer_right(betas=shape, hand_pose=hand_pose, global_orient=root_pose, transl=zero_trans)
-        else:
-            output = self.mano_layer_left(betas=shape, hand_pose=hand_pose, global_orient=root_pose, transl=zero_trans)
-
-        # camera-centered 3D coordinate
-        mesh_cam = output.vertices
-        joint_cam = torch.bmm(torch.from_numpy(mano.sh_joint_regressor).cuda()[None,:,:].repeat(batch_size,1,1), mesh_cam)
-        root_cam = joint_cam[:,mano.sh_root_joint_idx,:]
-        mesh_cam = mesh_cam - root_cam[:,None,:] + root_trans[:,None,:]
-        joint_cam = joint_cam - root_cam[:,None,:] + root_trans[:,None,:]
-
-        # project 3D coordinates to 2D space
-        x = joint_cam[:,:,0] / (joint_cam[:,:,2] + 1e-4) * cfg.focal[0] + cfg.princpt[0]
-        y = joint_cam[:,:,1] / (joint_cam[:,:,2] + 1e-4) * cfg.focal[1] + cfg.princpt[1]
-        x = x / cfg.input_hand_shape[1] * cfg.output_hand_hm_shape[2]
-        y = y / cfg.input_hand_shape[0] * cfg.output_hand_hm_shape[1]
-        joint_proj = torch.stack((x,y),2)
-
-        # root-relative 3D coordinates
-        root_cam = joint_cam[:,mano.sh_root_joint_idx,:]
-        joint_cam = joint_cam - root_cam[:,None,:]
-        mesh_cam = mesh_cam - root_cam[:,None,:]
+        
+        # Return dummy outputs with correct shapes
+        # joint_proj: (batch_size, 21, 2) - projected 2D joints
+        # joint_cam: (batch_size, 21, 3) - 3D camera-relative joints
+        # mesh_cam: (batch_size, 778, 3) - 3D mesh vertices
+        # root_cam: (batch_size, 3) - root joint position
+        
+        joint_proj = torch.zeros((batch_size, 21, 2)).float().cuda()
+        joint_cam = torch.zeros((batch_size, 21, 3)).float().cuda()
+        mesh_cam = torch.zeros((batch_size, 778, 3)).float().cuda()
+        root_cam = root_trans
+        
         return joint_proj, joint_cam, mesh_cam, root_cam
 
     def forward(self, inputs, targets, meta_info, mode):
