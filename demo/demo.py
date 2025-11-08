@@ -10,6 +10,23 @@ import os
 import os.path as osp
 import argparse
 import numpy as np
+
+# Compatibility shim for chumpy with numpy >= 1.24
+if not hasattr(np, 'bool'):
+    np.bool = np.bool_
+if not hasattr(np, 'int'):
+    np.int = np.int_
+if not hasattr(np, 'float'):
+    np.float = np.float_
+if not hasattr(np, 'complex'):
+    np.complex = np.complex_
+if not hasattr(np, 'object'):
+    np.object = np.object_
+if not hasattr(np, 'unicode'):
+    np.unicode = np.str_
+if not hasattr(np, 'str'):
+    np.str = np.str_
+
 import cv2
 import json
 import torch
@@ -67,7 +84,7 @@ os.makedirs(param_save_path, exist_ok=True)
 os.makedirs(render_save_path, exist_ok=True)
 
 # load paths of input images
-img_path_list = glob(osp.join(input_img_path, '*.jpg')) + glob(osp.join(input_img_path, '*.png'))
+img_path_list = glob(osp.join(input_img_path, '*.jpg')) + glob(osp.join(input_img_path, '*.jpeg')) + glob(osp.join(input_img_path, '*.png'))
 
 # for each input image
 for img_path in tqdm(img_path_list):

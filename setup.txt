@@ -1,0 +1,5 @@
+git clone https://github.com/ShivaSubhanS/InterWild
+pip install kornia fvcore iopath plyfile
+pip install --no-index --no-cache-dir pytorch3d -f https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/py310_cu116_pyt1131/download.html
+download model snapshot_6.pth
+mv to demo folder
